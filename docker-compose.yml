@@ -1,0 +1,64 @@
+name: realestate-lead-agent
+
+# Each service reads its own env file:
+#   backend/.env   -> backend + db (DB name/user/password are shared)
+#   frontend/.env  -> frontend
+# Host port for Postgres: DB_PUBLISHED_PORT in your shell, default 5440.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    env_file: ./backend/.env
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${DB_PUBLISHED_PORT:-5440}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: ./backend/.env
+    environment:
+      # inside the compose network the DB is "db:5432", whatever backend/.env says for local runs
+      DB_HOST: db
+      DB_PORT: 5432
+      UPLOAD_DIR: /data/uploads
+      HF_HOME: /data/hf_cache
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - uploads:/data/uploads
+      - hf_cache:/data/hf_cache
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    env_file: ./frontend/.env
+    environment:
+      VITE_PROXY_TARGET: http://backend:8000
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+      - npm_cache:/root/.npm
+    ports:
+      - "5173:5173"
+
+volumes:
+  pgdata:
+  uploads:
+  hf_cache:
+  frontend_node_modules:
+  npm_cache:
